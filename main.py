@@ -4,9 +4,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
-from sklearn.pipeline import make_pipeline
+# from sklearn.pipeline import make_pipeline
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score, classification_report
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from xgboost import XGBClassifier
+from sklearn.metrics import confusion_matrix, accuracy_score, classification_report, precision_score, recall_score, f1_score
 from imblearn.over_sampling import SMOTE
 
 
@@ -27,7 +29,8 @@ class LoanDefaultPrediction:
         print(df.isnull())
 
         # value counts for default vs non-default
-        distributions = df["Default"].value_counts(normalize=True)
+        distributions = df["Default"].value_counts()
+        print(f"\nCounts: {distributions}")
         percentages = distributions * 100
         print(f"\nDistribution of Default column: {percentages}")
 
@@ -38,7 +41,6 @@ class LoanDefaultPrediction:
         plt.figure(figsize=(7, 5))
         sns.countplot(df, x="Default")
         plt.title("Default vs. Non-Default")
-        # plt.show()
         plt.savefig("./viz/Target Class Distribution.jpg")
 
         # 3rd chart: distribution side by side
@@ -50,7 +52,6 @@ class LoanDefaultPrediction:
             axes[i].set_title(f"{feature} by Default Status")
 
         plt.tight_layout()
-        # plt.show()
         plt.savefig("./viz/Feature by Default.jpg")
 
         # check mean of features for each class
@@ -80,8 +81,6 @@ class LoanDefaultPrediction:
             axes[i].set_title(f"{feature} Distribution")
             axes[i].legend()
 
-        plt.tight_layout()
-        # plt.show()
         plt.savefig("./viz/KDEplot.jpg")
 
     def prepare_data(self, df: pd.DataFrame):
@@ -127,15 +126,25 @@ class LoanDefaultPrediction:
 
         return X_train, X_test, y_train, y_test
     
-    def train_model(self, X_train, y_train, X_test):
-        # create pipeline
-        lr = LogisticRegression()
-
-        lr.fit(X_train, y_train)
-
-        predictions = lr.predict(X_test)
-
-        return predictions
+    def train_and_evaluate_model(self, model, X_train, y_train, X_test, y_test, model_name):
+        """Train any model and return evaluation metrics"""
+        model.fit(X_train, y_train)
+        y_pred_proba = model.predict_proba(X_test)[:, 1]
+        
+        results = {}
+        for threshold in [0.3, 0.5, 0.7]:
+            y_pred = (y_pred_proba >= threshold).astype(int)
+            precision = precision_score(y_test, y_pred, pos_label=1)
+            recall = recall_score(y_test, y_pred, pos_label=1)
+            f1 = f1_score(y_test, y_pred, pos_label=1)
+            results[threshold] = {"precision": precision, "recall": recall, "f1": f1}
+            feature_importance = pd.DataFrame({
+                'feature': X_train.columns,
+                'importance': abs(model.coef_[0])
+            }).sort_values('importance', ascending=False)
+            print(feature_importance)
+        
+        return results
 
     def evaluate_model(self, preds, y_test):
         matrix = confusion_matrix(y_test, preds)
@@ -159,11 +168,24 @@ if __name__ == "__main__":
     print("\nX_train: \n", X_train[5:], "\nyTrain\n", y_train[5:])
     
     # modeling and evaluation
-    predictions = pipeline.train_model(X_train, y_train, X_test)
+    models = {
+        "Logistic Regression": LogisticRegression(),
+        "Random Forest": RandomForestClassifier(n_estimators=100, class_weight='balanced'),
+        "Gradient Boosting": GradientBoostingClassifier(),
+        "XGBoost": XGBClassifier(n_estimators=2, max_depth=2, learning_rate=1, objective='binary:logistic')
+    }
 
-    matrix, acc_results, class_results = pipeline.evaluate_model(predictions, y_test)
-    disp = ConfusionMatrixDisplay(matrix)
-    print("\n", disp.plot())
-    plt.savefig("./viz/Confusion Matrix")
+    comparison = {}
+    for model_name, model in models.items():
+        print(f"\n{'='*50}")
+        print(f"Training {model_name}...")
+        results = pipeline.train_and_evaluate_model(model, X_train, y_train, X_test, y_test, model_name)
+        comparison[model_name] = results
+        print(results)
 
-    print("\nResults: \n Accuracy: ", acc_results, "\n", class_results)
+    # matrix, acc_results, class_results = pipeline.evaluate_model(predictions, y_test)
+    # disp = ConfusionMatrixDisplay(matrix)
+    # disp.plot()
+    # plt.savefig("./viz/Confusion Matrix")
+
+    # print("\nResults: \n Accuracy: ", acc_results, "\n", class_results)
